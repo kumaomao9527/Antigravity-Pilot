@@ -1,0 +1,98 @@
+{
+    "name": "antigravity-plan-manager",
+    "displayName": "反重力计划管理器",
+    "description": "管理和查看反重力生成的实施计划",
+    "version": "0.1.0",
+    "publisher": "kumao",
+    "icon": "assets/icon.png",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [],
+    "main": "./dist/extension.js",
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "antigravity-explorer",
+                    "title": "反重力",
+                    "icon": "$(rocket)"
+                }
+            ]
+        },
+        "views": {
+            "antigravity-explorer": [
+                {
+                    "id": "antigravityPlans",
+                    "name": "实施计划"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "antigravityPlans.refreshEntry",
+                "title": "刷新计划列表",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "antigravityPlans.openPlan",
+                "title": "打开计划"
+            },
+            {
+                "command": "antigravityPlans.applyToChat",
+                "title": "应用到 AI 对话框",
+                "icon": "$(zap)"
+            },
+            {
+                "command": "antigravityPlans.deleteFolder",
+                "title": "删除计划文件夹",
+                "icon": "$(trash)"
+            }
+        ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "antigravityPlans.refreshEntry",
+                    "when": "view == antigravityPlans",
+                    "group": "navigation"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "antigravityPlans.applyToChat",
+                    "when": "view == antigravityPlans && (viewItem == planFile || viewItem == planFolder)",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "antigravityPlans.deleteFolder",
+                    "when": "view == antigravityPlans && viewItem == planFolder",
+                    "group": "inline@2"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts",
+        "test": "node ./out/test/runTest.js"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.80.0",
+        "@types/glob": "^8.1.0",
+        "@types/mocha": "^10.0.1",
+        "@types/node": "16.x",
+        "@typescript-eslint/eslint-plugin": "^5.59.8",
+        "@typescript-eslint/parser": "^5.59.8",
+        "eslint": "^8.41.0",
+        "glob": "^8.1.0",
+        "mocha": "^10.2.0",
+        "typescript": "^5.1.3",
+        "@vscode/test-electron": "^2.3.2"
+    }
+}
