@@ -32,15 +32,26 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
             return this.getPlansInFolder(element.fullPath);
         } else {
             // 获取 brain 下的所有对话文件夹，并进行启发式过滤
-            const folders = fs.readdirSync(this.brainDir, { withFileTypes: true })
+            const foldersData = fs.readdirSync(this.brainDir, { withFileTypes: true })
                 .filter(dirent => dirent.isDirectory())
-                .map(dirent => dirent.name);
+                .map(dirent => {
+                    const fullPath = path.join(this.brainDir, dirent.name);
+                    const stats = fs.statSync(fullPath);
+                    return {
+                        name: dirent.name,
+                        fullPath: fullPath,
+                        birthtimeMs: stats.birthtimeMs // 使用任务创建时间
+                    };
+                })
+                // 从最新的最先显示 (降序排序)
+                .sort((a, b) => b.birthtimeMs - a.birthtimeMs);
 
             const items: PlanItem[] = [];
             const currentWorkspace = vscode.workspace.workspaceFolders?.[0].uri.fsPath.toLowerCase();
 
-            for (const folder of folders) {
-                const fullPath = path.join(this.brainDir, folder);
+            for (const folderData of foldersData) {
+                const fullPath = folderData.fullPath;
+                const folder = folderData.name;
                 const isRelevant = await this.checkRelevance(fullPath, currentWorkspace);
 
                 if (isRelevant) {
@@ -72,7 +83,7 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
             }
 
             // 也提供一个“历史记录”节点存放不相关的（可选，此处先简单展示相关的）
-            return items.reverse(); // 最近的在前
+            return items;
         }
     }
 
