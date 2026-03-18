@@ -2,11 +2,7 @@
     "name": "antigravity-plan-manager",
     "displayName": "反重力计划管理器",
     "description": "管理和查看反重力生成的实施计划",
-    "version": "0.1.1",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/kumaomao9527/Antigravity-Pilot.git"
-    },
+    "version": "0.1.2",
     "publisher": "kumao",
     "repository": {
         "type": "git",
@@ -27,7 +23,7 @@
                 {
                     "id": "antigravity-explorer",
                     "title": "反重力",
-                    "icon": "$(rocket)"
+                    "icon": "assets/icon.png"
                 }
             ]
         },
@@ -35,7 +31,8 @@
             "antigravity-explorer": [
                 {
                     "id": "antigravityPlans",
-                    "name": "实施计划"
+                    "name": "实施计划",
+                    "icon": "assets/icon.png"
                 }
             ]
         },
@@ -56,7 +53,7 @@
             },
             {
                 "command": "antigravityPlans.deleteFolder",
-                "title": "删除计划文件夹",
+                "title": "删除",
                 "icon": "$(trash)"
             }
         ],
@@ -76,7 +73,7 @@
                 },
                 {
                     "command": "antigravityPlans.deleteFolder",
-                    "when": "view == antigravityPlans && viewItem == planFolder",
+                    "when": "view == antigravityPlans && (viewItem == planFolder || viewItem == planFile)",
                     "group": "inline@2"
                 }
             ]
