@@ -40,11 +40,11 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                     return {
                         name: dirent.name,
                         fullPath: fullPath,
-                        birthtimeMs: stats.birthtimeMs // 使用任务创建时间
+                        time: stats.birthtimeMs || stats.mtimeMs
                     };
                 })
                 // 从最新的最先显示 (降序排序)
-                .sort((a, b) => b.birthtimeMs - a.birthtimeMs);
+                .sort((a, b) => b.time - a.time);
 
             const items: PlanItem[] = [];
             const currentWorkspace = vscode.workspace.workspaceFolders?.[0].uri.fsPath.toLowerCase();
@@ -83,7 +83,7 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
             }
 
             // 也提供一个“历史记录”节点存放不相关的（可选，此处先简单展示相关的）
-            return items;
+            return items; // 按降序排序，最近的在前
         }
     }
 

@@ -8,6 +8,10 @@
         "url": "https://github.com/kumaomao9527/Antigravity-Pilot.git"
     },
     "publisher": "kumao",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/kumao/antigravity-plan-manager"
+    },
     "icon": "assets/icon.png",
     "engines": {
         "vscode": "^1.80.0"
