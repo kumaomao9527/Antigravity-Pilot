@@ -23,7 +23,7 @@
                 {
                     "id": "antigravity-explorer",
                     "title": "反重力",
-                    "icon": "assets/icon.png"
+                    "icon": "assets/antigravity-rocket.svg"
                 }
             ]
         },
@@ -32,7 +32,7 @@
                 {
                     "id": "antigravityPlans",
                     "name": "实施计划",
-                    "icon": "assets/icon.png"
+                    "icon": "assets/antigravity-rocket.svg"
                 }
             ]
         },
