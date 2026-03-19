@@ -47,12 +47,12 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                 .sort((a, b) => b.time - a.time);
 
             const items: PlanItem[] = [];
-            const currentWorkspace = vscode.workspace.workspaceFolders?.[0].uri.fsPath.toLowerCase();
+            const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath.toLowerCase()) || [];
 
             for (const folderData of foldersData) {
                 const fullPath = folderData.fullPath;
                 const folder = folderData.name;
-                const isRelevant = await this.checkRelevance(fullPath, currentWorkspace);
+                const isRelevant = await this.checkRelevance(fullPath, workspacePaths);
 
                 if (isRelevant) {
                     const stats = this.getFolderStats(fullPath);
@@ -174,23 +174,23 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
     }
 
     /**
-     * 启发式检测：检查 brain 文件夹中的 md 文件是否包含当前工作区的引用串启发式检测：检查 brain 文件夹中的 md 文件是否包含当前工作区的引用串
+     * 启发式检测：检查 brain 文件夹中的 md 文件是否包含任一当前工作区的引用串
      */
-    private async checkRelevance(folderPath: string, workspacePath?: string): Promise<boolean> {
-        if (!workspacePath) return false;
+    private async checkRelevance(folderPath: string, workspacePaths: string[]): Promise<boolean> {
+        if (workspacePaths.length === 0) return false;
 
         try {
             const files = fs.readdirSync(folderPath);
             for (const file of files) {
                 if (file.endsWith('.md')) {
                     const content = fs.readFileSync(path.join(folderPath, file), 'utf8').toLowerCase();
+                    
                     // 检查路径引用、CorpusName 或关键路径片段
-                    if (content.includes(workspacePath.toLowerCase()) ||
-                        content.includes(workspacePath.replace(/\\/g, '/').toLowerCase())) {
-                        return true;
+                    for (const wp of workspacePaths) {
+                        if (content.includes(wp) || content.includes(wp.replace(/\\/g, '/'))) {
+                            return true;
+                        }
                     }
-
-                    // 特殊处理：如果 content 中包含 task.md 且引用了当前目录下的文件（较弱的匹配）
                 }
             }
         } catch {
