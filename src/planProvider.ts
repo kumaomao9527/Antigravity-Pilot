@@ -154,7 +154,15 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
 
     private getFolderTitle(folderPath: string): string | undefined {
         try {
-            // 优先查找 task.md
+            // 1. 优先查找 implementation_plan.md
+            const impPath = path.join(folderPath, 'implementation_plan.md');
+            if (fs.existsSync(impPath)) {
+                const content = fs.readFileSync(impPath, 'utf8');
+                const titleMatch = content.match(/^#\s+(.+)$/m);
+                if (titleMatch) return titleMatch[1].trim();
+            }
+
+            // 2. 其次找 task.md
             const taskPath = path.join(folderPath, 'task.md');
             if (fs.existsSync(taskPath)) {
                 const content = fs.readFileSync(taskPath, 'utf8');
@@ -162,8 +170,8 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                 if (titleMatch) return titleMatch[1].trim();
             }
 
-            // 备选查找任何其他的 md 文件
-            const files = fs.readdirSync(folderPath).filter(f => f.endsWith('.md'));
+            // 3. 备选查找任何其他的 md 文件（排除 .resolved 备份）
+            const files = fs.readdirSync(folderPath).filter(f => f.endsWith('.md') && !f.includes('.resolved'));
             for (const file of files) {
                 const content = fs.readFileSync(path.join(folderPath, file), 'utf8');
                 const titleMatch = content.match(/^#\s+(.+)$/m);
@@ -174,20 +182,53 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
     }
 
     /**
-     * 启发式检测：检查 brain 文件夹中的 md 文件是否包含任一当前工作区的引用串
+     * 启发式检测：检查 brain 文件夹中的 md 文件是否包含任一当前工作区的引用串。
+     * 支持三种匹配策略：
+     * 1. 直接路径匹配（小写原始路径或正斜杠形式）
+     * 2. URL 解码路径匹配（md 文件中路径常以 file:///...%XX%YY... 形式存储）
+     * 3. 工作区文件夹名片段匹配（兜底，适用于路径中含中文编码的场景）
      */
     private async checkRelevance(folderPath: string, workspacePaths: string[]): Promise<boolean> {
         if (workspacePaths.length === 0) return false;
 
+        // 预计算每个工作区的匹配关键字列表（多种形式）
+        const matchKeywords: string[][] = workspacePaths.map(wp => {
+            const normalized = wp.replace(/\\/g, '/');  // 反斜杠 -> 正斜杠
+            let decoded = normalized;
+            try {
+                decoded = decodeURIComponent(normalized).toLowerCase();
+            } catch { /* 忽略解码错误 */ }
+
+            const keywords: string[] = [
+                wp,                          // 原始路径（已 toLowerCase）
+                normalized,                  // 正斜杠形式
+                decoded,                     // URL 解码后
+            ];
+
+            // 额外加入最后一层文件夹名（中文项目名往往在最尾端）
+            const folderName = path.basename(wp).toLowerCase();
+            if (folderName) {
+                keywords.push(folderName);
+                // URL 编码版本的文件夹名（匹配 file:/// 链接中的编码段）
+                try {
+                    keywords.push(encodeURIComponent(decodeURIComponent(folderName)).toLowerCase());
+                } catch { /* 忽略 */ }
+            }
+
+            return [...new Set(keywords)]; // 去重
+        });
+
         try {
             const files = fs.readdirSync(folderPath);
             for (const file of files) {
-                if (file.endsWith('.md')) {
-                    const content = fs.readFileSync(path.join(folderPath, file), 'utf8').toLowerCase();
-                    
-                    // 检查路径引用、CorpusName 或关键路径片段
-                    for (const wp of workspacePaths) {
-                        if (content.includes(wp) || content.includes(wp.replace(/\\/g, '/'))) {
+                if (!file.endsWith('.md') || file.includes('.resolved')) {
+                    continue;
+                }
+                const content = fs.readFileSync(path.join(folderPath, file), 'utf8').toLowerCase();
+
+                for (const keywords of matchKeywords) {
+                    for (const kw of keywords) {
+                        if (kw && content.includes(kw)) {
                             return true;
                         }
                     }
