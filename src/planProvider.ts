@@ -2,16 +2,26 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 
+export enum PlanItemType {
+    DateGroup = 'dateGroup',
+    TaskFolder = 'taskFolder',
+    TaskFile = 'taskFile'
+}
+
 export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<PlanItem | undefined | void> = new vscode.EventEmitter<PlanItem | undefined | void>();
     readonly onDidChangeTreeData: vscode.Event<PlanItem | undefined | void> = this._onDidChangeTreeData.event;
 
-    private brainDir: string;
+    public brainDir: string;
 
     constructor() {
         // 反重力默认 brain 目录
         const homeDir = process.env.USERPROFILE || process.env.HOME || '';
         this.brainDir = path.join(homeDir, '.gemini', 'antigravity', 'brain');
+    }
+
+    public getBrainDir(): string {
+        return this.brainDir;
     }
 
     refresh(): void {
@@ -27,64 +37,98 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
             return [];
         }
 
-        if (element) {
-            // 如果点击的是文件夹，展开其包含的 md 文件
-            return this.getPlansInFolder(element.fullPath);
-        } else {
-            // 获取 brain 下的所有对话文件夹，并进行启发式过滤
-            const foldersData = fs.readdirSync(this.brainDir, { withFileTypes: true })
-                .filter(dirent => dirent.isDirectory())
-                .map(dirent => {
-                    const fullPath = path.join(this.brainDir, dirent.name);
-                    const stats = fs.statSync(fullPath);
-                    return {
-                        name: dirent.name,
-                        fullPath: fullPath,
-                        time: stats.birthtimeMs || stats.mtimeMs
-                    };
-                })
-                // 从最新的最先显示 (降序排序)
-                .sort((a, b) => b.time - a.time);
+        const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath.toLowerCase()) || [];
+
+        if (!element) {
+            // 第一层：显示日期分组
+            const allFolders = await this.getAllRelevantFolders(workspacePaths);
+            const dateGroups = new Set<string>();
+            allFolders.forEach(f => {
+                const dateStr = this.formatDate(f.time);
+                dateGroups.add(dateStr);
+            });
+
+            return Array.from(dateGroups)
+                .sort((a, b) => b.localeCompare(a)) // 日期降序
+                .map(date => new PlanItem(
+                    date,
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    date,
+                    PlanItemType.DateGroup
+                ));
+        }
+
+        if (element.type === PlanItemType.DateGroup) {
+            // 第二层：显示该日期下的任务文件夹
+            const allFolders = await this.getAllRelevantFolders(workspacePaths);
+            const targetDate = element.fullPath;
+            const foldersInDate = allFolders.filter(f => this.formatDate(f.time) === targetDate);
 
             const items: PlanItem[] = [];
-            const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath.toLowerCase()) || [];
-
-            for (const folderData of foldersData) {
+            for (const folderData of foldersInDate) {
                 const fullPath = folderData.fullPath;
                 const folder = folderData.name;
-                const isRelevant = await this.checkRelevance(fullPath, workspacePaths);
+                const stats = this.getFolderStats(fullPath);
+                const folderTitle = this.getFolderTitle(fullPath) || folder;
 
-                if (isRelevant) {
-                    const stats = this.getFolderStats(fullPath);
-                    const folderTitle = this.getFolderTitle(fullPath) || folder;
+                const item = new PlanItem(
+                    folderTitle,
+                    vscode.TreeItemCollapsibleState.Collapsed,
+                    fullPath,
+                    PlanItemType.TaskFolder
+                );
 
-                    const item = new PlanItem(
-                        folderTitle,
-                        vscode.TreeItemCollapsibleState.Collapsed,
-                        fullPath,
-                        true
-                    );
+                if (stats.total > 0) {
+                    item.description = `${stats.completed}/${stats.total}`;
+                    item.tooltip = `${fullPath}\n总进度: ${stats.completed}/${stats.total}`;
 
-                    if (stats.total > 0) {
-                        item.description = `${stats.completed}/${stats.total}`;
-                        item.tooltip = `${fullPath}\n总进度: ${stats.completed}/${stats.total}`;
-
-                        if (stats.completed === stats.total) {
-                            // 使用带颜色的文件夹图标
-                            item.iconPath = new vscode.ThemeIcon('folder-active', new vscode.ThemeColor('gitDecoration.addedResourceForeground'));
-                        } else {
-                            // 使用黄色/橙色表示进行中
-                            item.iconPath = new vscode.ThemeIcon('folder', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
-                        }
+                    if (stats.completed === stats.total) {
+                        item.iconPath = new vscode.ThemeIcon('folder-active', new vscode.ThemeColor('gitDecoration.addedResourceForeground'));
+                    } else {
+                        item.iconPath = new vscode.ThemeIcon('folder', new vscode.ThemeColor('gitDecoration.modifiedResourceForeground'));
                     }
-
-                    items.push(item);
                 }
+                items.push(item);
             }
-
-            // 也提供一个“历史记录”节点存放不相关的（可选，此处先简单展示相关的）
-            return items; // 按降序排序，最近的在前
+            return items;
         }
+
+        if (element.type === PlanItemType.TaskFolder) {
+            // 第三层：显示文件夹内的 md 文件
+            return this.getPlansInFolder(element.fullPath);
+        }
+
+        return [];
+    }
+
+    private async getAllRelevantFolders(workspacePaths: string[]): Promise<any[]> {
+        const folders = fs.readdirSync(this.brainDir, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => {
+                const fullPath = path.join(this.brainDir, dirent.name);
+                const stats = fs.statSync(fullPath);
+                return {
+                    name: dirent.name,
+                    fullPath: fullPath,
+                    time: stats.birthtimeMs || stats.mtimeMs
+                };
+            });
+
+        const relevantFolders = [];
+        for (const folder of folders) {
+            if (await this.checkRelevance(folder.fullPath, workspacePaths)) {
+                relevantFolders.push(folder);
+            }
+        }
+        return relevantFolders.sort((a, b) => b.time - a.time);
+    }
+
+    private formatDate(timestamp: number): string {
+        const date = new Date(timestamp);
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
     }
 
     private getPlansInFolder(folderPath: string): PlanItem[] {
@@ -112,7 +156,7 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                 label,
                 vscode.TreeItemCollapsibleState.None,
                 fullPath,
-                false
+                PlanItemType.TaskFile
             );
 
             // 根据状态设置不同的上下文和图标提示
@@ -129,7 +173,6 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                 title: '打开计划',
                 arguments: [vscode.Uri.file(fullPath)]
             };
-            item.contextValue = 'planFile';
             return item;
         });
     }
@@ -181,62 +224,39 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
         return undefined;
     }
 
-    /**
-     * 启发式检测：检查 brain 文件夹中的 md 文件是否包含任一当前工作区的引用串。
-     * 支持三种匹配策略：
-     * 1. 直接路径匹配（小写原始路径或正斜杠形式）
-     * 2. URL 解码路径匹配（md 文件中路径常以 file:///...%XX%YY... 形式存储）
-     * 3. 工作区文件夹名片段匹配（兜底，适用于路径中含中文编码的场景）
-     */
     private async checkRelevance(folderPath: string, workspacePaths: string[]): Promise<boolean> {
         if (workspacePaths.length === 0) return false;
 
-        // 预计算每个工作区的匹配关键字列表（多种形式）
         const matchKeywords: string[][] = workspacePaths.map(wp => {
-            const normalized = wp.replace(/\\/g, '/');  // 反斜杠 -> 正斜杠
+            const normalized = wp.replace(/\\/g, '/');
             let decoded = normalized;
             try {
                 decoded = decodeURIComponent(normalized).toLowerCase();
-            } catch { /* 忽略解码错误 */ }
+            } catch { }
 
-            const keywords: string[] = [
-                wp,                          // 原始路径（已 toLowerCase）
-                normalized,                  // 正斜杠形式
-                decoded,                     // URL 解码后
-            ];
-
-            // 额外加入最后一层文件夹名（中文项目名往往在最尾端）
+            const keywords: string[] = [wp, normalized, decoded];
             const folderName = path.basename(wp).toLowerCase();
             if (folderName) {
                 keywords.push(folderName);
-                // URL 编码版本的文件夹名（匹配 file:/// 链接中的编码段）
                 try {
                     keywords.push(encodeURIComponent(decodeURIComponent(folderName)).toLowerCase());
-                } catch { /* 忽略 */ }
+                } catch { }
             }
-
-            return [...new Set(keywords)]; // 去重
+            return [...new Set(keywords)];
         });
 
         try {
             const files = fs.readdirSync(folderPath);
             for (const file of files) {
-                if (!file.endsWith('.md') || file.includes('.resolved')) {
-                    continue;
-                }
+                if (!file.endsWith('.md') || file.includes('.resolved')) continue;
                 const content = fs.readFileSync(path.join(folderPath, file), 'utf8').toLowerCase();
-
                 for (const keywords of matchKeywords) {
                     for (const kw of keywords) {
-                        if (kw && content.includes(kw)) {
-                            return true;
-                        }
+                        if (kw && content.includes(kw)) return true;
                     }
                 }
             }
-        } catch {
-            return false;
-        }
+        } catch { return false; }
         return false;
     }
 }
@@ -246,20 +266,26 @@ class PlanItem extends vscode.TreeItem {
         public readonly label: string,
         public readonly collapsibleState: vscode.TreeItemCollapsibleState,
         public readonly fullPath: string,
-        public readonly isFolder: boolean
+        public readonly type: PlanItemType
     ) {
         super(label, collapsibleState);
         this.tooltip = this.fullPath;
-        this.resourceUri = vscode.Uri.file(fullPath);
+        
+        // 只有文件和文件夹才有关联的 resourceUri
+        if (type !== PlanItemType.DateGroup) {
+            this.resourceUri = vscode.Uri.file(fullPath);
+        }
 
-        if (isFolder) {
+        if (type === PlanItemType.DateGroup) {
+            this.contextValue = 'dateGroup';
+            this.iconPath = new vscode.ThemeIcon('calendar');
+        } else if (type === PlanItemType.TaskFolder) {
             this.contextValue = 'planFolder';
             if (!this.iconPath) {
                 this.iconPath = new vscode.ThemeIcon('folder');
             }
         } else {
             this.contextValue = 'planFile';
-            // 文件不再通过 label 拼进度，改用 description
             const match = label.match(/\((\d+\/\d+)\)/);
             if (match) {
                 this.label = label.replace(/\s*\(\d+\/\d+\)/, '');

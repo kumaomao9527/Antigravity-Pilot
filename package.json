@@ -73,7 +73,7 @@
                 },
                 {
                     "command": "antigravityPlans.deleteFolder",
-                    "when": "view == antigravityPlans && (viewItem == planFolder || viewItem == planFile)",
+                    "when": "view == antigravityPlans && (viewItem == planFolder || viewItem == planFile || viewItem == dateGroup)",
                     "group": "inline@2"
                 }
             ]

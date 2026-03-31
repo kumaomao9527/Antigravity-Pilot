@@ -66,34 +66,67 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    // 注册删除命令（支持批量删除）
+    // 注册删除命令（支持单选、多选、日期分组批量删除）
     context.subscriptions.push(
         vscode.commands.registerCommand('antigravityPlans.deleteFolder', async (item: any, selectedItems?: any[]) => {
-            // VS Code 会把当前点击的项作为第一个参数，所有选中的项作为第二个参数
             const items = selectedItems || [item];
-            const validItems = items.filter(i => i && i.fullPath);
+            const validItems = items.filter(i => i && (i.fullPath || i.contextValue === 'dateGroup'));
 
             if (validItems.length === 0) return;
 
-            const isMultiple = validItems.length > 1;
-            const message = isMultiple
-                ? `确定要物理删除选中的 ${validItems.length} 个项目吗？此操作不可撤销。`
-                : `确定要物理删除该项目吗？此操作不可撤销。\n路径: ${validItems[0].fullPath}`;
+            const brainDir = planProvider.getBrainDir();
+            if (!fs.existsSync(brainDir)) return;
+
+            // 预取所有目录信息，用于日期匹配
+            const allFolders = fs.readdirSync(brainDir, { withFileTypes: true })
+                .filter(d => d.isDirectory())
+                .map(d => {
+                    const p = path.join(brainDir, d.name);
+                    const s = fs.statSync(p);
+                    const time = s.birthtimeMs || s.mtimeMs;
+                    const date = new Date(time);
+                    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                    return { path: p, date: dateStr };
+                });
+
+            // 汇总待删除的所有物理路径
+            const pathsToRm = new Set<string>();
+            let summaryMessages = [];
+
+            for (const i of validItems) {
+                if (i.contextValue === 'dateGroup') {
+                    const targetDate = i.fullPath;
+                    const folderPaths = allFolders.filter(f => f.date === targetDate).map(f => f.path);
+                    folderPaths.forEach(p => pathsToRm.add(p));
+                    summaryMessages.push(`日期 [${targetDate}] 下的所有任务 (${folderPaths.length} 个)`);
+                } else if (i.fullPath) {
+                    pathsToRm.add(i.fullPath);
+                    if (validItems.length <= 1) {
+                        summaryMessages.push(`项目: ${path.basename(i.fullPath)}`);
+                    }
+                }
+            }
+
+            if (pathsToRm.size === 0) return;
+
+            const confirmMessage = summaryMessages.length > 1 || pathsToRm.size > 1
+                ? `确定要物理删除选中的项目吗？共计 ${pathsToRm.size} 个文件夹。此操作不可撤销。`
+                : `确定要物理删除以下内容吗？此操作不可撤销。\n${summaryMessages[0]}`;
 
             const confirm = await vscode.window.showWarningMessage(
-                message,
+                confirmMessage,
                 { modal: true },
                 '确定删除'
             );
 
             if (confirm === '确定删除') {
                 try {
-                    for (const i of validItems) {
-                        if (fs.existsSync(i.fullPath)) {
-                            fs.rmSync(i.fullPath, { recursive: true, force: true });
+                    for (const p of pathsToRm) {
+                        if (fs.existsSync(p)) {
+                            fs.rmSync(p, { recursive: true, force: true });
                         }
                     }
-                    vscode.window.showInformationMessage(isMultiple ? `${validItems.length} 个项目已删除` : '项目已删除');
+                    vscode.window.showInformationMessage(`已成功删除 ${pathsToRm.size} 个文件夹`);
                     planProvider.refresh();
                 } catch (err: any) {
                     vscode.window.showErrorMessage(`删除失败: ${err.message}`);
