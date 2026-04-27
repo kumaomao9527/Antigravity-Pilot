@@ -2,7 +2,7 @@
     "name": "antigravity-plan-manager",
     "displayName": "反重力计划管理器",
     "description": "管理和查看反重力生成的实施计划",
-    "version": "0.1.3",
+    "version": "0.1.5",
     "publisher": "kumao",
     "repository": {
         "type": "git",

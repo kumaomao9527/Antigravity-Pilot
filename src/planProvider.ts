@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 export enum PlanItemType {
+    Info = 'info',
     DateGroup = 'dateGroup',
     TaskFolder = 'taskFolder',
     TaskFile = 'taskFile'
@@ -40,6 +41,38 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
         const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath.toLowerCase()) || [];
 
         if (!element) {
+            const items: PlanItem[] = [];
+
+            // 添加工作区信息
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders) {
+                workspaceFolders.forEach(folder => {
+                    items.push(new PlanItem(
+                        `工作区: ${folder.name}`,
+                        vscode.TreeItemCollapsibleState.None,
+                        folder.uri.fsPath,
+                        PlanItemType.Info
+                    ));
+                });
+            }
+
+            // 添加匹配依据信息
+            const keywords = workspaceFolders?.map(f => f.name).join(', ') || '无';
+            items.push(new PlanItem(
+                `匹配依据: ${keywords}`,
+                vscode.TreeItemCollapsibleState.None,
+                '用于过滤任务的关键字',
+                PlanItemType.Info
+            ));
+
+            // 添加匹配路径信息 (Brain 完整路径)
+            items.push(new PlanItem(
+                `匹配路径: ${this.brainDir}`,
+                vscode.TreeItemCollapsibleState.None,
+                '任务文件存放目录',
+                PlanItemType.Info
+            ));
+
             // 第一层：显示日期分组
             const allFolders = await this.getAllRelevantFolders(workspacePaths);
             const dateGroups = new Set<string>();
@@ -48,7 +81,7 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                 dateGroups.add(dateStr);
             });
 
-            return Array.from(dateGroups)
+            const dateItems = Array.from(dateGroups)
                 .sort((a, b) => b.localeCompare(a)) // 日期降序
                 .map(date => new PlanItem(
                     date,
@@ -56,6 +89,8 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                     date,
                     PlanItemType.DateGroup
                 ));
+
+            return [...items, ...dateItems];
         }
 
         if (element.type === PlanItemType.DateGroup) {
@@ -276,7 +311,19 @@ class PlanItem extends vscode.TreeItem {
             this.resourceUri = vscode.Uri.file(fullPath);
         }
 
-        if (type === PlanItemType.DateGroup) {
+        if (type === PlanItemType.Info) {
+            this.contextValue = 'infoItem';
+            if (label.startsWith('工作区')) {
+                this.iconPath = new vscode.ThemeIcon('folder-active');
+            } else if (label.startsWith('匹配依据')) {
+                this.iconPath = new vscode.ThemeIcon('search');
+            } else if (label.startsWith('匹配路径')) {
+                this.iconPath = new vscode.ThemeIcon('folder-opened');
+            } else {
+                this.iconPath = new vscode.ThemeIcon('info');
+            }
+            this.description = fullPath;
+        } else if (type === PlanItemType.DateGroup) {
             this.contextValue = 'dateGroup';
             this.iconPath = new vscode.ThemeIcon('calendar');
         } else if (type === PlanItemType.TaskFolder) {
