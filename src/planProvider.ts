@@ -57,11 +57,10 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
             }
 
             // 添加匹配依据信息
-            const keywords = workspaceFolders?.map(f => f.name).join(', ') || '无';
             items.push(new PlanItem(
-                `匹配依据: ${keywords}`,
+                `匹配依据: 完整路径匹配`,
                 vscode.TreeItemCollapsibleState.None,
-                '用于过滤任务的关键字',
+                '仅显示包含当前工作区完整路径的任务',
                 PlanItemType.Info
             ));
 
@@ -263,21 +262,22 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
         if (workspacePaths.length === 0) return false;
 
         const matchKeywords: string[][] = workspacePaths.map(wp => {
-            const normalized = wp.replace(/\\/g, '/');
-            let decoded = normalized;
+            const normalized = wp.replace(/\\/g, '/').toLowerCase();
+            const keywords: string[] = [
+                wp.toLowerCase(),
+                normalized
+            ];
+
             try {
-                decoded = decodeURIComponent(normalized).toLowerCase();
+                const fileUri = vscode.Uri.file(wp).toString().toLowerCase();
+                keywords.push(fileUri);
+                // 包含未编码但转义后的路径（处理某些 AI 生成的格式）
+                keywords.push(decodeURIComponent(fileUri));
+                // 处理可能不带 file:// 前缀的 URI 路径
+                keywords.push(fileUri.replace(/^file:\/\/\/?/, ''));
             } catch { }
 
-            const keywords: string[] = [wp, normalized, decoded];
-            const folderName = path.basename(wp).toLowerCase();
-            if (folderName) {
-                keywords.push(folderName);
-                try {
-                    keywords.push(encodeURIComponent(decodeURIComponent(folderName)).toLowerCase());
-                } catch { }
-            }
-            return [...new Set(keywords)];
+            return [...new Set(keywords.filter(k => k.length > 0))];
         });
 
         try {
