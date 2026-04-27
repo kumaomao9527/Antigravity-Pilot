@@ -18,6 +18,13 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('antigravityPlans.refreshEntry', () => planProvider.refresh())
     );
 
+    // 监听活跃编辑器切换，自动刷新
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(() => {
+            planProvider.refresh();
+        })
+    );
+
     // 注册打开文件命令
     context.subscriptions.push(
         vscode.commands.registerCommand('antigravityPlans.openPlan', (fileUri: vscode.Uri) => {

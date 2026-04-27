@@ -38,7 +38,15 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
             return [];
         }
 
-        const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath.toLowerCase()) || [];
+        const activeEditor = vscode.window.activeTextEditor;
+        const activeFilePath = activeEditor?.document.uri.fsPath;
+        const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
+        
+        // 汇总所有可能的匹配路径（工作区路径 + 当前打开文件路径）
+        const allTargetPaths = [...workspacePaths];
+        if (activeFilePath) {
+            allTargetPaths.push(activeFilePath);
+        }
 
         if (!element) {
             const items: PlanItem[] = [];
@@ -73,7 +81,7 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
             ));
 
             // 第一层：显示日期分组
-            const allFolders = await this.getAllRelevantFolders(workspacePaths);
+            const allFolders = await this.getAllRelevantFolders(allTargetPaths);
             const dateGroups = new Set<string>();
             allFolders.forEach(f => {
                 const dateStr = this.formatDate(f.time);
@@ -94,7 +102,7 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
 
         if (element.type === PlanItemType.DateGroup) {
             // 第二层：显示该日期下的任务文件夹
-            const allFolders = await this.getAllRelevantFolders(workspacePaths);
+            const allFolders = await this.getAllRelevantFolders(allTargetPaths);
             const targetDate = element.fullPath;
             const foldersInDate = allFolders.filter(f => this.formatDate(f.time) === targetDate);
 
@@ -258,36 +266,60 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
         return undefined;
     }
 
-    private async checkRelevance(folderPath: string, workspacePaths: string[]): Promise<boolean> {
-        if (workspacePaths.length === 0) return false;
+    private async checkRelevance(folderPath: string, targetPaths: string[]): Promise<boolean> {
+        if (targetPaths.length === 0) return false;
 
-        const matchKeywords: string[][] = workspacePaths.map(wp => {
-            const normalized = wp.replace(/\\/g, '/').toLowerCase();
-            const keywords: string[] = [
-                wp.toLowerCase(),
-                normalized
-            ];
-
-            try {
-                const fileUri = vscode.Uri.file(wp).toString().toLowerCase();
-                keywords.push(fileUri);
-                // 包含未编码但转义后的路径（处理某些 AI 生成的格式）
-                keywords.push(decodeURIComponent(fileUri));
-                // 处理可能不带 file:// 前缀的 URI 路径
-                keywords.push(fileUri.replace(/^file:\/\/\/?/, ''));
-            } catch { }
-
-            return [...new Set(keywords.filter(k => k.length > 0))];
+        // 规范化所有目标工作区路径（统一为斜杠、小写）
+        const normalizedTargets = targetPaths.map(tp => {
+            let p = tp.replace(/\\/g, '/').toLowerCase();
+            if (p.endsWith('/')) {
+                p = p.substring(0, p.length - 1);
+            }
+            return p;
         });
 
         try {
             const files = fs.readdirSync(folderPath);
             for (const file of files) {
                 if (!file.endsWith('.md') || file.includes('.resolved')) continue;
-                const content = fs.readFileSync(path.join(folderPath, file), 'utf8').toLowerCase();
-                for (const keywords of matchKeywords) {
-                    for (const kw of keywords) {
-                        if (kw && content.includes(kw)) return true;
+                const fullPath = path.join(folderPath, file);
+                const rawContent = fs.readFileSync(fullPath, 'utf8');
+                const lowerContent = rawContent.toLowerCase();
+                
+                // 1. 尝试直接在原始内容中搜索编码后的目标路径（提升性能）
+                // 虽然 URI 编码的大小写可能有差异，但这能覆盖大部分情况
+                for (const target of normalizedTargets) {
+                    try {
+                        const encodedTarget = encodeURIComponent(target).toLowerCase();
+                        // 注意：encodeURIComponent 会编码 /，而 file:/// 里的 / 通常不编码
+                        // 这是一个简单的兜底
+                        if (lowerContent.includes(target)) return true;
+                    } catch { }
+                }
+
+                // 2. 解码整个内容并进行路径匹配（最准确，但稍重）
+                try {
+                    const decodedContent = decodeURIComponent(rawContent).toLowerCase();
+                    // 规范化内容中的斜杠
+                    const normalizedContent = decodedContent.replace(/\\/g, '/');
+                    
+                    for (const target of normalizedTargets) {
+                        // 检查是否包含完整的目标路径
+                        if (normalizedContent.includes(target)) {
+                            return true;
+                        }
+                    }
+                } catch (e) {
+                    // 如果 decodeURIComponent 失败（可能包含非法字符），则降级到正则提取匹配
+                    const uriRegex = /file:\/\/\/[^\)\s]*/gi;
+                    let match;
+                    while ((match = uriRegex.exec(rawContent)) !== null) {
+                        try {
+                            const decoded = decodeURIComponent(match[0]).toLowerCase().replace(/\\/g, '/');
+                            for (const target of normalizedTargets) {
+                                if (decoded.includes(target)) return true;
+                            }
+                        } catch { }
                     }
                 }
             }
