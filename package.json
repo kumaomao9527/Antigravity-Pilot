@@ -55,6 +55,11 @@
                 "command": "antigravityPlans.deleteFolder",
                 "title": "删除",
                 "icon": "$(trash)"
+            },
+            {
+                "command": "antigravityPlans.deleteBeforeDate",
+                "title": "删除该日期之前的数据",
+                "icon": "$(trash-clear)"
             }
         ],
         "menus": {
@@ -62,7 +67,12 @@
                 {
                     "command": "antigravityPlans.refreshEntry",
                     "when": "view == antigravityPlans",
-                    "group": "navigation"
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "antigravityPlans.deleteBeforeDate",
+                    "when": "view == antigravityPlans",
+                    "group": "navigation@2"
                 }
             ],
             "view/item/context": [
@@ -75,6 +85,11 @@
                     "command": "antigravityPlans.deleteFolder",
                     "when": "view == antigravityPlans && (viewItem == planFolder || viewItem == planFile || viewItem == dateGroup)",
                     "group": "inline@2"
+                },
+                {
+                    "command": "antigravityPlans.deleteBeforeDate",
+                    "when": "view == antigravityPlans && viewItem == dateGroup",
+                    "group": "1_modification"
                 }
             ]
         }

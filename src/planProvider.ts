@@ -6,7 +6,9 @@ export enum PlanItemType {
     Info = 'info',
     DateGroup = 'dateGroup',
     TaskFolder = 'taskFolder',
-    TaskFile = 'taskFile'
+    TaskFile = 'taskFile',
+    Detail = 'detail',
+    ConfigGroup = 'configGroup'
 }
 
 export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
@@ -33,54 +35,37 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
         return element;
     }
 
+    public getTargetPaths(): string[] {
+        const activeEditor = vscode.window.activeTextEditor;
+        const activeFilePath = activeEditor?.document.uri.fsPath;
+        const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
+
+        const allTargetPaths = [...workspacePaths];
+        if (activeFilePath) {
+            allTargetPaths.push(activeFilePath);
+        }
+        return allTargetPaths;
+    }
+
     async getChildren(element?: PlanItem): Promise<PlanItem[]> {
         if (!fs.existsSync(this.brainDir)) {
             return [];
         }
 
-        const activeEditor = vscode.window.activeTextEditor;
-        const activeFilePath = activeEditor?.document.uri.fsPath;
-        const workspacePaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
+        const allTargetPaths = this.getTargetPaths();
         
-        // 汇总所有可能的匹配路径（工作区路径 + 当前打开文件路径）
-        const allTargetPaths = [...workspacePaths];
-        if (activeFilePath) {
-            allTargetPaths.push(activeFilePath);
-        }
-
         if (!element) {
             const items: PlanItem[] = [];
 
-            // 添加工作区信息
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (workspaceFolders) {
-                workspaceFolders.forEach(folder => {
-                    items.push(new PlanItem(
-                        `工作区: ${folder.name}`,
-                        vscode.TreeItemCollapsibleState.None,
-                        folder.uri.fsPath,
-                        PlanItemType.Info
-                    ));
-                });
-            }
-
-            // 添加匹配依据信息
+            // 顶部显示一个统一的图标和文字：辅助信息
             items.push(new PlanItem(
-                `匹配依据: 完整路径匹配`,
-                vscode.TreeItemCollapsibleState.None,
-                '仅显示包含当前工作区完整路径的任务',
-                PlanItemType.Info
+                "辅助信息",
+                vscode.TreeItemCollapsibleState.Collapsed,
+                "config",
+                PlanItemType.ConfigGroup
             ));
 
-            // 添加匹配路径信息 (Brain 完整路径)
-            items.push(new PlanItem(
-                `匹配路径: ${this.brainDir}`,
-                vscode.TreeItemCollapsibleState.None,
-                '任务文件存放目录',
-                PlanItemType.Info
-            ));
-
-            // 第一层：显示日期分组
+            // 显示日期分组
             const allFolders = await this.getAllRelevantFolders(allTargetPaths);
             const dateGroups = new Set<string>();
             allFolders.forEach(f => {
@@ -97,8 +82,44 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
                     PlanItemType.DateGroup
                 ));
 
-            return [...items, ...dateItems];
+            return [...dateItems, ...items];
         }
+
+        if (element.type === PlanItemType.ConfigGroup) {
+            const items: PlanItem[] = [];
+
+            // 1. 添加工作区信息
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (workspaceFolders) {
+                workspaceFolders.forEach(folder => {
+                    items.push(new PlanItem(
+                        `工作区: ${folder.name}`,
+                        vscode.TreeItemCollapsibleState.None,
+                        folder.uri.fsPath,
+                        PlanItemType.Info
+                    ));
+                });
+            }
+
+            // 2. 添加匹配依据信息
+            items.push(new PlanItem(
+                `匹配依据: 完整路径匹配`,
+                vscode.TreeItemCollapsibleState.None,
+                '仅显示包含当前工作区完整路径的任务',
+                PlanItemType.Info
+            ));
+
+            // 3. 添加匹配路径信息 (不再需要二级折叠)
+            items.push(new PlanItem(
+                `匹配路径: ${this.brainDir}`,
+                vscode.TreeItemCollapsibleState.None,
+                this.brainDir,
+                PlanItemType.Info
+            ));
+
+            return items;
+        }
+
 
         if (element.type === PlanItemType.DateGroup) {
             // 第二层：显示该日期下的任务文件夹
@@ -266,7 +287,7 @@ export class PlanProvider implements vscode.TreeDataProvider<PlanItem> {
         return undefined;
     }
 
-    private async checkRelevance(folderPath: string, targetPaths: string[]): Promise<boolean> {
+    public async checkRelevance(folderPath: string, targetPaths: string[]): Promise<boolean> {
         if (targetPaths.length === 0) return false;
 
         // 规范化所有目标工作区路径（统一为斜杠、小写）
@@ -363,7 +384,7 @@ class PlanItem extends vscode.TreeItem {
             if (!this.iconPath) {
                 this.iconPath = new vscode.ThemeIcon('folder');
             }
-        } else {
+        } else if (type === PlanItemType.TaskFile) {
             this.contextValue = 'planFile';
             const match = label.match(/\((\d+\/\d+)\)/);
             if (match) {
@@ -373,6 +394,13 @@ class PlanItem extends vscode.TreeItem {
             if (!this.iconPath) {
                 this.iconPath = new vscode.ThemeIcon('markdown');
             }
+        } else if (type === PlanItemType.Detail) {
+            this.contextValue = 'detailItem';
+            this.iconPath = new vscode.ThemeIcon('link-external');
+            this.tooltip = fullPath;
+        } else if (type === PlanItemType.ConfigGroup) {
+            this.contextValue = 'configGroup';
+            this.iconPath = new vscode.ThemeIcon('settings-gear');
         }
     }
 }

@@ -99,17 +99,29 @@ export function activate(context: vscode.ExtensionContext) {
             // 汇总待删除的所有物理路径
             const pathsToRm = new Set<string>();
             let summaryMessages = [];
+            const targetPaths = planProvider.getTargetPaths();
 
             for (const i of validItems) {
                 if (i.contextValue === 'dateGroup') {
                     const targetDate = i.fullPath;
                     const folderPaths = allFolders.filter(f => f.date === targetDate).map(f => f.path);
-                    folderPaths.forEach(p => pathsToRm.add(p));
-                    summaryMessages.push(`日期 [${targetDate}] 下的所有任务 (${folderPaths.length} 个)`);
+                    
+                    let relevantCount = 0;
+                    // 仅添加相关的路径
+                    for (const p of folderPaths) {
+                        if (await planProvider.checkRelevance(p, targetPaths)) {
+                            pathsToRm.add(p);
+                            relevantCount++;
+                        }
+                    }
+                    summaryMessages.push(`日期 [${targetDate}] 下的相关任务 (${relevantCount} 个)`);
                 } else if (i.fullPath) {
-                    pathsToRm.add(i.fullPath);
-                    if (validItems.length <= 1) {
-                        summaryMessages.push(`项目: ${path.basename(i.fullPath)}`);
+                    // 单个项目删除前也做一次安全性校验
+                    if (await planProvider.checkRelevance(i.fullPath, targetPaths)) {
+                        pathsToRm.add(i.fullPath);
+                        if (validItems.length <= 1) {
+                            summaryMessages.push(`项目: ${path.basename(i.fullPath)}`);
+                        }
                     }
                 }
             }
@@ -134,6 +146,82 @@ export function activate(context: vscode.ExtensionContext) {
                         }
                     }
                     vscode.window.showInformationMessage(`已成功删除 ${pathsToRm.size} 个文件夹`);
+                    planProvider.refresh();
+                } catch (err: any) {
+                    vscode.window.showErrorMessage(`删除失败: ${err.message}`);
+                }
+            }
+        })
+    );
+
+    // 注册删除指定日期之前数据的命令
+    context.subscriptions.push(
+        vscode.commands.registerCommand('antigravityPlans.deleteBeforeDate', async (item: any) => {
+            const brainDir = planProvider.getBrainDir();
+            if (!fs.existsSync(brainDir)) return;
+
+            // 1. 获取所有目录及其日期
+            const allFolders = fs.readdirSync(brainDir, { withFileTypes: true })
+                .filter(d => d.isDirectory())
+                .map(d => {
+                    const p = path.join(brainDir, d.name);
+                    const s = fs.statSync(p);
+                    const time = s.birthtimeMs || s.mtimeMs;
+                    const date = new Date(time);
+                    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                    return { path: p, date: dateStr };
+                });
+
+            if (allFolders.length === 0) {
+                vscode.window.showInformationMessage('没有可删除的数据。');
+                return;
+            }
+
+            // 2. 确定截止日期
+            let targetDate = '';
+            if (item && item.contextValue === 'dateGroup') {
+                targetDate = item.fullPath;
+            } else {
+                // 如果是从标题菜单触发，让用户选择一个日期
+                const dates = Array.from(new Set(allFolders.map(f => f.date))).sort((a, b) => b.localeCompare(a));
+                const selected = await vscode.window.showQuickPick(dates, {
+                    placeHolder: '选择一个日期，将删除该日期之前的所有数据'
+                });
+                if (!selected) return;
+                targetDate = selected;
+            }
+
+            // 3. 筛选早于该日期的文件夹，并检查是否与当前工作区相关
+            const potentialPaths = allFolders.filter(f => f.date < targetDate).map(f => f.path);
+            const targetPaths = planProvider.getTargetPaths();
+            const pathsToRm = [];
+            
+            for (const p of potentialPaths) {
+                if (await planProvider.checkRelevance(p, targetPaths)) {
+                    pathsToRm.push(p);
+                }
+            }
+
+            if (pathsToRm.length === 0) {
+                vscode.window.showInformationMessage(`没有早于 ${targetDate} 且属于当前工作区的数据。`);
+                return;
+            }
+
+            // 4. 确认删除
+            const confirm = await vscode.window.showWarningMessage(
+                `确定要物理删除所有早于 ${targetDate} 的数据吗？共计 ${pathsToRm.length} 个文件夹。此操作不可撤销。`,
+                { modal: true },
+                '确定删除'
+            );
+
+            if (confirm === '确定删除') {
+                try {
+                    for (const p of pathsToRm) {
+                        if (fs.existsSync(p)) {
+                            fs.rmSync(p, { recursive: true, force: true });
+                        }
+                    }
+                    vscode.window.showInformationMessage(`已成功删除 ${pathsToRm.length} 个文件夹`);
                     planProvider.refresh();
                 } catch (err: any) {
                     vscode.window.showErrorMessage(`删除失败: ${err.message}`);
